@@ -1,0 +1,166 @@
+package org.example.chatapplication.controller;
+
+import javafx.application.Platform;
+import javafx.event.ActionEvent;
+import javafx.fxml.FXML;
+import javafx.fxml.Initializable;
+import javafx.scene.control.*;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.stage.FileChooser;
+
+import java.io.*;
+import java.net.Socket;
+import java.net.URL;
+import java.nio.file.Files;
+import java.time.LocalDate;
+import java.util.ResourceBundle;
+
+public class ClientController implements Initializable {
+
+    @FXML
+    private Button btnSend;
+
+    @FXML
+    private ListView<Object> messageArea;
+
+    @FXML
+    private TextField txtText;
+
+    private ObjectOutputStream outputStream;
+    private ObjectInputStream inputStream;
+    String clientName;
+    private boolean nameAccepted = false;
+
+    @FXML
+    void btnSend(ActionEvent event) {
+        String message = txtText.getText();
+        if (message.equals("BYE")){
+            closeConnection();
+        }
+        try {
+            outputStream.writeObject(message);
+            outputStream.flush();
+            txtText.clear();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public void initialize(URL url, ResourceBundle resourceBundle) {
+        messageArea.setCellFactory(objectListView -> new ListCell<Object>(){
+            @Override
+            protected void updateItem(Object item, boolean empty) {
+                super.updateItem(item, empty);
+
+                if (empty || item == null){
+                    setText(null);
+                }else if (item instanceof String){
+                    setText((String) item);
+                    setGraphic(null);
+                } else if (item instanceof Image) {
+                    Image image = (Image) item;
+                    ImageView imageView = new ImageView(image);
+                    imageView.setFitHeight(100);
+                    imageView.setFitWidth(100);
+                    imageView.setPreserveRatio(true);
+                    imageView.setSmooth(true);
+                    imageView.setCache(true);
+
+                    setGraphic(imageView);
+                    setText(null);
+                }
+            }
+        });
+
+        try {
+            Socket socket = new Socket("localhost", 7000);
+            outputStream = new ObjectOutputStream(socket.getOutputStream());
+            inputStream = new ObjectInputStream(socket.getInputStream());
+
+            Thread thread = new Thread(this::listenForMessages);
+            thread.start();
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+    void listenForMessages(){
+        try {
+            while (true){
+                Object message = inputStream.readObject();
+                if (message == null) break;
+                if (message instanceof String){
+                    String text = (String) message;
+                    if (text.startsWith("SUBMITNAME")){
+//                        if (!nameAccepted){
+//                            promtForName();
+//                        }
+                    } else if (text.startsWith("NAMEACCEPTED")) {
+//                        nameAccepted = true;
+                        Platform.runLater(() -> {
+                            messageArea.getItems().add("Connect As " + clientName);
+                        });
+                    } else if (text.startsWith("TEXT")) {
+                        Platform.runLater(() -> {
+                            if (text.startsWith("TEXT " + clientName + ": ")){
+                                messageArea.getItems().add("You: " + text.substring(clientName.length()+2+5));
+                            }else {
+                                messageArea.getItems().add(text.substring(5));
+                            }
+                        });
+                    }else if (text.startsWith("DATE")) {
+                        Platform.runLater(() -> {
+                            if (text.startsWith("DATE" + clientName + ": ")){
+                                messageArea.getItems().add("Date: " + text.substring(clientName.length()+2+5) );
+                            }else {
+                                messageArea.getItems().add(text.substring(5));
+                            }
+                        });
+                    } else if (text.startsWith("TIME")) {
+                        Platform.runLater(() -> {
+                            if (text.startsWith("TIME" + clientName + ": ")){
+                                messageArea.getItems().add("TIME: " + text.substring(clientName.length()+2+5) );
+                            }else {
+                                messageArea.getItems().add(text.substring(5));
+                            }
+                        });
+                    }
+                }
+            }
+        } catch (IOException | ClassNotFoundException e) {
+            Platform.runLater(() -> messageArea.getItems().add("Disconnected" + e.getMessage()));
+        }finally {
+            closeConnection();
+        }
+    }
+
+    void closeConnection() {
+        try {
+            if (outputStream != null) {
+                outputStream.close();
+            }
+
+            if (inputStream != null) {
+                inputStream.close();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    void setClientName(String clientName) {
+        this.clientName = clientName.trim();
+
+        if (!nameAccepted){
+            nameAccepted = true;
+            try {
+                outputStream.writeObject(clientName);
+                outputStream.flush();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+}
